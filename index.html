@@ -127,17 +127,26 @@ function render() {
   $('status').textContent = all.length ? `${live} live · showing ${list.length} of ${all.length} matches` : 'No matches right now.';
 }
 
+function setMatches(list) {
+  all = list;
+  const leagues = [...new Set(all.map(m => m.league))].sort();
+  $('league').innerHTML = '<option value="">All leagues</option>' +
+    leagues.map(l => `<option${l === filters.league ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  render();
+}
+
 async function loadMatches() {
   $('status').textContent = 'Loading matches…';
   try {
     const res = await fetch(`https://${HOST}/all-match`, { headers: HEADERS });
-    all = (await res.json()).result || [];
-    const leagues = [...new Set(all.map(m => m.league))].sort();
-    $('league').innerHTML = '<option value="">All leagues</option>' +
-      leagues.map(l => `<option${l === filters.league ? ' selected' : ''}>${esc(l)}</option>`).join('');
-    render();
-  } catch {
-    $('status').textContent = 'Failed to load matches. Tap refresh to retry.';
+    const data = await res.json();
+    if (!res.ok || data.message) throw new Error(data.message || `HTTP ${res.status}`);
+    localStorage.setItem('matches', JSON.stringify(data.result || []));
+    setMatches(data.result || []);
+  } catch (err) {
+    const cached = JSON.parse(localStorage.getItem('matches') || '[]');
+    if (cached.length) setMatches(cached);
+    $('status').textContent = `API error: ${err.message}${cached.length ? ' — showing last known matches.' : ''}`;
   }
 }
 
@@ -154,7 +163,8 @@ async function play(id, title, el) {
   document.querySelectorAll('.match.playing').forEach(b => b.classList.remove('playing'));
   try {
     const res = await fetch(`https://${HOST}/link/${encodeURIComponent(id)}`, { headers: HEADERS });
-    const { url } = await res.json();
+    const { url, message } = await res.json();
+    if (message) { $('status').textContent = `API error: ${message}`; return; }
     if (!url) { $('status').textContent = 'No stream available for this match.'; return; }
 
     // Some finished/ended matches return a dead placeholder playlist — detect it
