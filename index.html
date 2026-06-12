@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FSteamer — Live Football</title>
+<meta name="theme-color" content="#0b1a0f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    background: #0b1a0f; color: #e7f5ea;
+    min-height: 100dvh; padding: max(16px, env(safe-area-inset-top)) 16px 32px;
+    max-width: 720px; margin: 0 auto;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; }
+  h1 { font-size: 1.3rem; }
+  h1 span { color: #4ade80; }
+  #refresh { border: 0; background: #11251a; color: #4ade80; padding: 8px 14px; border-radius: 10px; font-size: .9rem; }
+  #status { padding: 6px 2px 12px; font-size: .9rem; color: #9fc7a8; min-height: 2em; }
+  video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 12px; display: none; margin-bottom: 12px; }
+  video.live { display: block; }
+  #nowplaying { display: none; font-size: .95rem; padding-bottom: 16px; color: #9fc7a8; }
+  .match {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 12px; margin-bottom: 8px; background: #11251a; border: 1px solid transparent;
+    border-radius: 12px; color: inherit; font-size: .95rem; cursor: pointer;
+  }
+  .match:active { opacity: .8; }
+  .match.playing { border-color: #16a34a; }
+  .match img { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+  .teams { flex: 1; min-width: 0; }
+  .teams div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .league { font-size: .75rem; color: #6b9d77; }
+  .meta { text-align: right; flex-shrink: 0; font-size: .85rem; }
+  .score { font-weight: 700; font-size: 1rem; }
+  .badge { color: #f87171; font-weight: 600; }
+  .badge.up { color: #6b9d77; font-weight: 400; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ F<span>Steamer</span></h1>
+  <button id="refresh">↻ Refresh</button>
+</header>
+<video id="player" controls playsinline></video>
+<p id="nowplaying"></p>
+<p id="status">Loading matches…</p>
+<div id="matches"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script>
+const HOST = 'football-live-stream-api.p.rapidapi.com';
+const KEY = 'df04a1df80msh5716b2c3304634cp1fddd4jsn8c59795cd4c0';
+const HEADERS = { 'x-rapidapi-host': HOST, 'x-rapidapi-key': KEY };
+const $ = id => document.getElementById(id);
+let hls;
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+
+async function loadMatches() {
+  $('status').textContent = 'Loading matches…';
+  try {
+    const res = await fetch(`https://${HOST}/all-match`, { headers: HEADERS });
+    const { result = [] } = await res.json();
+    const order = { Live: 0, Upcoming: 1 };
+    result.sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ??  2));
+    $('matches').innerHTML = result.map(m => `
+      <button class="match" data-id="${esc(m.id)}" data-title="${esc(m.home_name)} vs ${esc(m.away_name)}">
+        <img src="${esc(m.home_flag)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <div class="teams">
+          <div>${esc(m.home_name)}</div>
+          <div>${esc(m.away_name)}</div>
+          <div class="league">${esc(m.league)}</div>
+        </div>
+        <div class="meta">
+          ${m.status === 'Live'
+            ? `<div class="score">${esc(m.score)}</div><div class="badge">● ${esc(m.currentMinutes ?? '')}′</div>`
+            : `<div>${esc((m.kickoff || '').slice(11, 16))}</div><div class="badge up">${esc(m.status)}</div>`}
+        </div>
+      </button>`).join('');
+    const live = result.filter(m => m.status === 'Live').length;
+    $('status').textContent = result.length
+      ? `${live} live · ${result.length} matches`
+      : 'No matches right now.';
+  } catch {
+    $('status').textContent = 'Failed to load matches. Pull refresh to retry.';
+  }
+}
+
+async function play(id, title, el) {
+  $('status').textContent = `Fetching stream for ${title}…`;
+  document.querySelectorAll('.match.playing').forEach(b => b.classList.remove('playing'));
+  try {
+    const res = await fetch(`https://${HOST}/link/${encodeURIComponent(id)}`, { headers: HEADERS });
+    const { url } = await res.json();
+    if (!url) { $('status').textContent = 'No stream available for this match yet.'; return; }
+
+    const video = $('player');
+    video.classList.add('live');
+    el.classList.add('playing');
+    if (hls) hls.destroy();
+    if (video.canPlayType('application/vnd.apple.mpegurl')) { // iOS native HLS
+      video.src = url;
+    } else if (window.Hls && Hls.isSupported()) {
+      hls = new Hls();
+      hls.loadSource(url);
+      hls.attachMedia(video);
+    } else {
+      video.src = url;
+    }
+    video.play().catch(() => {});
+    $('nowplaying').style.display = 'block';
+    $('nowplaying').textContent = `🔴 ${title}`;
+    $('status').textContent = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch {
+    $('status').textContent = 'Failed to load stream. Try again.';
+  }
+}
+
+$('matches').onclick = e => {
+  const btn = e.target.closest('.match');
+  if (btn) play(btn.dataset.id, btn.dataset.title, btn);
+};
+$('refresh').onclick = loadMatches;
+loadMatches();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
