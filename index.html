@@ -56,7 +56,7 @@
       font-size: .9rem;
     }
 
-    #status {
+    .status {
       padding: 6px 2px 12px;
       font-size: .9rem;
       color: #9fc7a8;
@@ -90,8 +90,8 @@
       padding-bottom: 12px;
     }
 
-    .controls input,
-    .controls select {
+    input,
+    select {
       width: 100%;
       padding: 10px 12px;
       border-radius: 10px;
@@ -126,12 +126,25 @@
       border-radius: 999px;
       font-size: .85rem;
       white-space: nowrap;
+      cursor: pointer;
     }
 
     .chip.on {
       background: #16a34a;
       border-color: #16a34a;
       color: #fff;
+    }
+
+    #tabs {
+      padding-bottom: 12px;
+    }
+
+    .tab {
+      display: none;
+    }
+
+    .tab.on {
+      display: block;
     }
 
     .match {
@@ -201,6 +214,51 @@
       color: #6b9d77;
       font-weight: 400;
     }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+    }
+
+    th,
+    td {
+      padding: 8px 6px;
+      text-align: right;
+      border-bottom: 1px solid #1c3424;
+    }
+
+    th {
+      color: #6b9d77;
+      font-weight: 600;
+      font-size: .75rem;
+      text-transform: uppercase;
+    }
+
+    th:nth-child(2),
+    td:nth-child(2) {
+      text-align: left;
+      width: 99%;
+    }
+
+    td:first-child {
+      color: #6b9d77;
+    }
+
+    .player {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px;
+      margin-bottom: 8px;
+      background: #11251a;
+      border-radius: 12px;
+      font-size: .95rem;
+    }
+
+    .player small {
+      color: #6b9d77;
+    }
   </style>
 </head>
 
@@ -209,39 +267,83 @@
     <h1>⚽ F<span>Steamer</span></h1>
     <button id="refresh">↻ Refresh</button>
   </header>
-  <video id="player" controls playsinline></video>
-  <p id="nowplaying"></p>
-  <div class="controls">
-    <input id="search" type="search" placeholder="Search teams or leagues…" autocomplete="off">
-    <div class="chips" id="statusChips">
-      <button class="chip on" data-v="">All</button>
-      <button class="chip" data-v="Live">🔴 Live</button>
-      <button class="chip" data-v="Upcoming">Upcoming</button>
-      <button class="chip" data-v="Finished">Finished</button>
-    </div>
-    <div class="row">
-      <select id="league">
-        <option value="">All leagues</option>
-      </select>
-      <select id="sort">
-        <option value="status">Sort: Live first</option>
-        <option value="time">Sort: Kickoff time</option>
-        <option value="league">Sort: League</option>
-      </select>
-    </div>
+
+  <div class="chips" id="tabs">
+    <button class="chip on" data-t="matches">Matches</button>
+    <button class="chip" data-t="standings">Standings</button>
+    <button class="chip" data-t="players">Players</button>
   </div>
-  <p id="status">Loading matches…</p>
-  <div id="matches"></div>
+
+  <section id="tab-matches" class="tab on">
+    <video id="player" controls playsinline></video>
+    <p id="nowplaying"></p>
+    <div class="controls">
+      <input id="search" type="search" placeholder="Search teams or leagues…" autocomplete="off">
+      <div class="chips" id="statusChips">
+        <button class="chip on" data-v="">All</button>
+        <button class="chip" data-v="Live">🔴 Live</button>
+        <button class="chip" data-v="Upcoming">Upcoming</button>
+        <button class="chip" data-v="Finished">Finished</button>
+      </div>
+      <div class="row">
+        <select id="league">
+          <option value="">All leagues</option>
+        </select>
+        <select id="sort">
+          <option value="status">Sort: Live first</option>
+          <option value="time">Sort: Kickoff time</option>
+          <option value="league">Sort: League</option>
+        </select>
+      </div>
+    </div>
+    <p id="status" class="status">Loading matches…</p>
+    <div id="matches"></div>
+  </section>
+
+  <section id="tab-standings" class="tab">
+    <div class="controls">
+      <select id="standLeague"></select>
+    </div>
+    <p id="standStatus" class="status"></p>
+    <div id="standings"></div>
+  </section>
+
+  <section id="tab-players" class="tab">
+    <div class="controls">
+      <input id="playerQ" type="search" placeholder="Search players or coaches… (press Enter)" autocomplete="off">
+    </div>
+    <p id="playerStatus" class="status"></p>
+    <div id="players"></div>
+  </section>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   <script>
-    // API key lives server-side in the Cloudflare Worker proxy (worker/)
+    // API keys live server-side in the Cloudflare Worker proxy (worker/).
+    // Streams come from football-live-stream-api; scores, standings and
+    // players come from free-api-live-football-data as a richer fallback.
     const API = 'https://fsteamer-proxy.shamodoro-services.workers.dev';
     const $ = id => document.getElementById(id);
     let hls, all = [], linkCache = {}, filters = { q: '', status: '', league: '', sort: 'status' };
 
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 
+    async function api(path) {
+      const res = await fetch(`${API}${path}`);
+      const data = await res.json();
+      if (!res.ok || data.message) throw new Error(data.message || `HTTP ${res.status}`);
+      return data;
+    }
+
+    // ---------- Tabs ----------
+    $('tabs').onclick = e => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      document.querySelectorAll('#tabs .chip').forEach(c => c.classList.toggle('on', c === chip));
+      document.querySelectorAll('.tab').forEach(s => s.classList.toggle('on', s.id === `tab-${chip.dataset.t}`));
+      if (chip.dataset.t === 'standings' && !$('standLeague').options.length) loadLeagues();
+    };
+
+    // ---------- Matches ----------
     function render() {
       let list = all.filter(m =>
         (!filters.status || m.status === filters.status) &&
@@ -251,44 +353,68 @@
       const order = { Live: 0, Upcoming: 1, Finished: 2 };
       list.sort((a, b) =>
         filters.sort === 'time' ? (a.kickoff || '').localeCompare(b.kickoff || '') :
-          filters.sort === 'league' ? a.league.localeCompare(b.league) || (a.kickoff || '').localeCompare(b.kickoff || '') :
+          filters.sort === 'league' ? (a.league || '').localeCompare(b.league || '') || (a.kickoff || '').localeCompare(b.kickoff || '') :
             (order[a.status] ?? 3) - (order[b.status] ?? 3) || (a.kickoff || '').localeCompare(b.kickoff || '')
       );
-      $('matches').innerHTML = list.map(m => `
-    <button class="match" data-id="${esc(m.id)}" data-title="${esc(m.home_name)} vs ${esc(m.away_name)}">
-      <img src="${esc(m.home_flag)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-      <div class="teams">
-        <div>${esc(m.home_name)}</div>
-        <div>${esc(m.away_name)}</div>
-        <div class="league">${esc(m.league)}</div>
-      </div>
-      <div class="meta">
-        ${m.status === 'Live'
+      $('matches').innerHTML = list.map((m, i) => `
+        <button class="match" data-i="${all.indexOf(m)}">
+          ${m.home_flag ? `<img src="${esc(m.home_flag)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : ''}
+          <div class="teams">
+            <div>${esc(m.home_name)}</div>
+            <div>${esc(m.away_name)}</div>
+            <div class="league">${esc(m.league)}</div>
+          </div>
+          <div class="meta">
+            ${m.status === 'Live'
           ? `<div class="score">${esc(m.score)}</div><div class="badge">● ${esc(m.currentMinutes ?? '')}′</div>`
           : m.status === 'Finished'
             ? `<div class="score">${esc(m.score)}</div><div class="badge dim">FT · ${esc((m.kickoff || '').slice(5, 10))}</div>`
             : `<div>${esc((m.kickoff || '').slice(11, 16))}</div><div class="badge dim">${esc((m.kickoff || '').slice(5, 10))}</div>`}
-      </div>
-    </button>`).join('') || '<p id="empty" style="color:#6b9d77">No matches found.</p>';
+          </div>
+        </button>`).join('') || '<p class="status">No matches found.</p>';
       const live = all.filter(m => m.status === 'Live').length;
       $('status').textContent = all.length ? `${live} live · showing ${list.length} of ${all.length} matches` : 'No matches right now.';
     }
 
     function setMatches(list) {
       all = list;
-      const leagues = [...new Set(all.map(m => m.league))].sort();
+      const leagues = [...new Set(all.map(m => m.league).filter(Boolean))].sort();
       $('league').innerHTML = '<option value="">All leagues</option>' +
         leagues.map(l => `<option${l === filters.league ? ' selected' : ''}>${esc(l)}</option>`).join('');
       render();
     }
 
-    // The free plan allows only 50 requests/day, so reuse the match list
+    // Fallback source: live-data API, mapped to the stream API's match shape
+    const mapData = m => ({
+      src: 'data',
+      home_name: m.home?.longName || m.home?.name,
+      away_name: m.away?.longName || m.away?.name,
+      league: m.leagueName || '',
+      score: `${m.home?.score ?? 0} - ${m.away?.score ?? 0}`,
+      status: m.status?.finished ? 'Finished' : m.status?.started ? 'Live' : 'Upcoming',
+      kickoff: m.status?.utcTime || '',
+      currentMinutes: m.status?.liveTime?.short?.replace(/[^\d+]/g, '') || '',
+    });
+
+    async function loadDataMatches() {
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const [live, byDate] = await Promise.allSettled([
+        api('/data/football-current-live'),
+        api(`/data/football-get-matches-by-date?date=${today}`),
+      ]);
+      const liveList = live.value?.response?.live || [];
+      const dayList = byDate.value?.response?.matches || [];
+      const liveIds = new Set(liveList.map(m => m.id));
+      return [...liveList, ...dayList.filter(m => !liveIds.has(m.id))].map(mapData);
+    }
+
+    // The free plans allow ~50 requests/day each, so reuse the match list
     // for 5 minutes unless the user forces a refresh.
     const TTL = 5 * 60 * 1000;
 
     async function loadMatches(force = false) {
       const cached = JSON.parse(localStorage.getItem('matches') || 'null');
-      if (!force && cached && Date.now() - cached.at < TTL) {
+      if (!force && cached?.at && Date.now() - cached.at < TTL) {
         setMatches(cached.list);
         const age = Math.round((Date.now() - cached.at) / 60000);
         $('status').textContent += ` · cached ${age ? age + 'm ago' : 'just now'}`;
@@ -296,14 +422,20 @@
       }
       $('status').textContent = 'Loading matches…';
       try {
-        const res = await fetch(`${API}/all-match`);
-        const data = await res.json();
-        if (!res.ok || data.message) throw new Error(data.message || `HTTP ${res.status}`);
-        localStorage.setItem('matches', JSON.stringify({ at: Date.now(), list: data.result || [] }));
-        setMatches(data.result || []);
-      } catch (err) {
-        if (cached?.list?.length) setMatches(cached.list);
-        $('status').textContent = `API error: ${err.message}${cached?.list?.length ? ' — showing last known matches.' : ''}`;
+        const data = await api('/all-match');
+        const list = data.result || [];
+        localStorage.setItem('matches', JSON.stringify({ at: Date.now(), list }));
+        setMatches(list);
+      } catch (streamErr) {
+        try { // stream API quota hit or unsubscribed: rotate to the data API
+          const list = await loadDataMatches();
+          localStorage.setItem('matches', JSON.stringify({ at: Date.now(), list }));
+          setMatches(list);
+          $('status').textContent += ' · live-data source (streams may be unavailable)';
+        } catch {
+          if (cached?.list?.length) setMatches(cached.list);
+          $('status').textContent = `API error: ${streamErr.message}${cached?.list?.length ? ' — showing last known matches.' : ''}`;
+        }
       }
     }
 
@@ -314,18 +446,21 @@
       if (msg) $('status').textContent = msg;
     }
 
-    async function play(id, title, el) {
+    async function play(m, el) {
       stop();
-      $('status').textContent = `Fetching stream for ${title}…`;
+      const title = `${m.home_name} vs ${m.away_name}`;
       document.querySelectorAll('.match.playing').forEach(b => b.classList.remove('playing'));
+      if (m.src === 'data') {
+        $('status').textContent = 'No stream for this match — the stream API is unavailable right now.';
+        return;
+      }
+      $('status').textContent = `Fetching stream for ${title}…`;
       try {
-        let url = linkCache[id];
+        let url = linkCache[m.id];
         if (!url) {
-          const res = await fetch(`${API}/link/${encodeURIComponent(id)}`);
-          const data = await res.json();
-          if (data.message) { $('status').textContent = `API error: ${data.message}`; return; }
+          const data = await api(`/link/${encodeURIComponent(m.id)}`);
           url = data.url;
-          if (url) linkCache[id] = url;
+          if (url) linkCache[m.id] = url;
         }
         if (!url) { $('status').textContent = 'No stream available for this match.'; return; }
 
@@ -365,14 +500,14 @@
         $('nowplaying').textContent = `🔴 ${title}`;
         $('status').textContent = '';
         window.scrollTo({ top: 0, behavior: 'smooth' });
-      } catch {
-        $('status').textContent = 'Failed to load stream. Try again.';
+      } catch (err) {
+        $('status').textContent = `Failed to load stream: ${err.message}`;
       }
     }
 
     $('matches').onclick = e => {
       const btn = e.target.closest('.match');
-      if (btn) play(btn.dataset.id, btn.dataset.title, btn);
+      if (btn) play(all[+btn.dataset.i], btn);
     };
     $('refresh').onclick = () => loadMatches(true);
     $('search').oninput = e => { filters.q = e.target.value.trim().toLowerCase(); render(); };
@@ -385,6 +520,66 @@
       document.querySelectorAll('#statusChips .chip').forEach(c => c.classList.toggle('on', c === chip));
       render();
     };
+
+    // ---------- Standings ----------
+    async function loadLeagues() {
+      $('standStatus').textContent = 'Loading leagues…';
+      try {
+        const data = await api('/data/football-get-all-leagues-with-countries');
+        $('standLeague').innerHTML = (data.response?.leagues || []).map(c =>
+          `<optgroup label="${esc(c.name)}">${c.leagues.map(l =>
+            `<option value="${l.id}">${esc(l.name)}</option>`).join('')}</optgroup>`).join('');
+        const wc = [...$('standLeague').options].find(o => /world cup/i.test(o.text) && !/qual|u\d|women|club/i.test(o.text));
+        $('standLeague').value = wc ? wc.value : '47';
+        loadStandings($('standLeague').value);
+      } catch (err) {
+        $('standStatus').textContent = `API error: ${err.message}`;
+      }
+    }
+
+    async function loadStandings(id) {
+      $('standings').innerHTML = '';
+      $('standStatus').textContent = 'Loading standings…';
+      try {
+        const data = await api(`/data/football-get-standing-all?leagueid=${encodeURIComponent(id)}`);
+        const rows = data.response?.standing || [];
+        if (!rows.length) { $('standStatus').textContent = 'No standings for this competition.'; return; }
+        $('standings').innerHTML = `<table>
+          <tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr>
+          ${rows.map(r => `<tr><td>${r.idx}</td><td>${esc(r.shortName || r.name)}</td><td>${r.played}</td>
+            <td>${r.wins}</td><td>${r.draws}</td><td>${r.losses}</td><td>${r.goalConDiff > 0 ? '+' : ''}${r.goalConDiff}</td>
+            <td><b>${r.pts}</b></td></tr>`).join('')}
+        </table>`;
+        $('standStatus').textContent = '';
+      } catch (err) {
+        $('standStatus').textContent = `API error: ${err.message}`;
+      }
+    }
+
+    $('standLeague').onchange = e => loadStandings(e.target.value);
+
+    // ---------- Players ----------
+    async function searchPlayers(q) {
+      $('players').innerHTML = '';
+      $('playerStatus').textContent = 'Searching…';
+      try {
+        const data = await api(`/data/football-players-search?search=${encodeURIComponent(q)}`);
+        const list = data.response?.suggestions || [];
+        $('players').innerHTML = list.map(p => `
+          <div class="player">
+            <span>${esc(p.name)}${p.isCoach ? ' <small>(coach)</small>' : ''}</span>
+            <small>${esc(p.teamName || '')}</small>
+          </div>`).join('') || '<p class="status">No players found.</p>';
+        $('playerStatus').textContent = list.length ? `${list.length} results` : '';
+      } catch (err) {
+        $('playerStatus').textContent = `API error: ${err.message}`;
+      }
+    }
+
+    $('playerQ').onkeydown = e => {
+      if (e.key === 'Enter' && e.target.value.trim()) searchPlayers(e.target.value.trim());
+    };
+
     loadMatches();
 
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

@@ -7,8 +7,12 @@ Works on **Android** and **iOS** — open it in the browser and add it to your h
 
 ## Features
 
-- Live match list with scores, minutes, and kickoff times (`/all-match`)
-- Tap a match to stream it (`/link/{id}`) — HLS via hls.js, native HLS on iOS Safari
+- Live match list with scores, minutes, and kickoff times — search, status/league
+  filters, and sorting
+- Tap a match to stream it — HLS via hls.js, native HLS on iOS Safari
+- League standings and player search (Free API Live Football Data)
+- Automatic failover: if the stream API's quota is exhausted, the match list
+  rotates to the live-data API so scores keep working
 - Installable: web app manifest + service worker (app shell cached offline)
 - Zero build step, zero dependencies — plain HTML/CSS/JS
 
