@@ -259,6 +259,44 @@
     .player small {
       color: #6b9d77;
     }
+
+    #installBanner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #11251a;
+      border: 1px solid #1d3b28;
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      font-size: .85rem;
+    }
+
+    #installBanner[hidden] {
+      display: none;
+    }
+
+    #installMsg {
+      flex: 1;
+    }
+
+    #installBtn {
+      border: 0;
+      background: #4ade80;
+      color: #0b1a0f;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+
+    #installDismiss {
+      border: 0;
+      background: none;
+      color: #6b9d77;
+      font-size: 1rem;
+      padding: 4px;
+    }
   </style>
 </head>
 
@@ -267,6 +305,12 @@
     <h1>⚽ F<span>Steamer</span></h1>
     <button id="refresh">↻ Refresh</button>
   </header>
+
+  <div id="installBanner" hidden>
+    <span id="installMsg">Install FSteamer for full-screen play and offline access.</span>
+    <button id="installBtn">Install</button>
+    <button id="installDismiss">✕</button>
+  </div>
 
   <div class="chips" id="tabs">
     <button class="chip on" data-t="matches">Matches</button>
@@ -583,6 +627,41 @@
     loadMatches();
 
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
+    // --- Install prompt ---
+    const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    const installDismissed = localStorage.getItem('installDismissed');
+    let deferredInstall = null;
+
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      deferredInstall = e;
+      if (!standalone && !installDismissed) $('installBanner').hidden = false;
+    });
+
+    // iOS Safari never fires beforeinstallprompt — show manual instructions instead.
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS && !standalone && !installDismissed) {
+      $('installMsg').textContent = 'Install FSteamer: tap the Share button, then “Add to Home Screen”.';
+      $('installBtn').hidden = true;
+      $('installBanner').hidden = false;
+    }
+
+    $('installBtn').onclick = async () => {
+      if (!deferredInstall) return;
+      deferredInstall.prompt();
+      await deferredInstall.userChoice;
+      deferredInstall = null;
+      $('installBanner').hidden = true;
+    };
+
+    $('installDismiss').onclick = () => {
+      $('installBanner').hidden = true;
+      localStorage.setItem('installDismissed', '1');
+    };
+
+    window.addEventListener('appinstalled', () => { $('installBanner').hidden = true; });
   </script>
 </body>
 
