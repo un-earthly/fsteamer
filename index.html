@@ -91,7 +91,7 @@ const HOST = 'football-live-stream-api.p.rapidapi.com';
 const KEY = 'df04a1df80msh5716b2c3304634cp1fddd4jsn8c59795cd4c0';
 const HEADERS = { 'x-rapidapi-host': HOST, 'x-rapidapi-key': KEY };
 const $ = id => document.getElementById(id);
-let hls, all = [], filters = { q: '', status: '', league: '', sort: 'status' };
+let hls, all = [], linkCache = {}, filters = { q: '', status: '', league: '', sort: 'status' };
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 
@@ -135,18 +135,28 @@ function setMatches(list) {
   render();
 }
 
-async function loadMatches() {
+// The free plan allows only 50 requests/day, so reuse the match list
+// for 5 minutes unless the user forces a refresh.
+const TTL = 5 * 60 * 1000;
+
+async function loadMatches(force = false) {
+  const cached = JSON.parse(localStorage.getItem('matches') || 'null');
+  if (!force && cached && Date.now() - cached.at < TTL) {
+    setMatches(cached.list);
+    const age = Math.round((Date.now() - cached.at) / 60000);
+    $('status').textContent += ` · cached ${age ? age + 'm ago' : 'just now'}`;
+    return;
+  }
   $('status').textContent = 'Loading matches…';
   try {
     const res = await fetch(`https://${HOST}/all-match`, { headers: HEADERS });
     const data = await res.json();
     if (!res.ok || data.message) throw new Error(data.message || `HTTP ${res.status}`);
-    localStorage.setItem('matches', JSON.stringify(data.result || []));
+    localStorage.setItem('matches', JSON.stringify({ at: Date.now(), list: data.result || [] }));
     setMatches(data.result || []);
   } catch (err) {
-    const cached = JSON.parse(localStorage.getItem('matches') || '[]');
-    if (cached.length) setMatches(cached);
-    $('status').textContent = `API error: ${err.message}${cached.length ? ' — showing last known matches.' : ''}`;
+    if (cached?.list?.length) setMatches(cached.list);
+    $('status').textContent = `API error: ${err.message}${cached?.list?.length ? ' — showing last known matches.' : ''}`;
   }
 }
 
@@ -162,9 +172,14 @@ async function play(id, title, el) {
   $('status').textContent = `Fetching stream for ${title}…`;
   document.querySelectorAll('.match.playing').forEach(b => b.classList.remove('playing'));
   try {
-    const res = await fetch(`https://${HOST}/link/${encodeURIComponent(id)}`, { headers: HEADERS });
-    const { url, message } = await res.json();
-    if (message) { $('status').textContent = `API error: ${message}`; return; }
+    let url = linkCache[id];
+    if (!url) {
+      const res = await fetch(`https://${HOST}/link/${encodeURIComponent(id)}`, { headers: HEADERS });
+      const data = await res.json();
+      if (data.message) { $('status').textContent = `API error: ${data.message}`; return; }
+      url = data.url;
+      if (url) linkCache[id] = url;
+    }
     if (!url) { $('status').textContent = 'No stream available for this match.'; return; }
 
     // Some finished/ended matches return a dead placeholder playlist — detect it
@@ -212,7 +227,7 @@ $('matches').onclick = e => {
   const btn = e.target.closest('.match');
   if (btn) play(btn.dataset.id, btn.dataset.title, btn);
 };
-$('refresh').onclick = loadMatches;
+$('refresh').onclick = () => loadMatches(true);
 $('search').oninput = e => { filters.q = e.target.value.trim().toLowerCase(); render(); };
 $('league').onchange = e => { filters.league = e.target.value; render(); };
 $('sort').onchange = e => { filters.sort = e.target.value; render(); };
