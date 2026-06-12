@@ -27,9 +27,18 @@ install prompt on Android Chrome).
 
 ## Configuration
 
-The RapidAPI key lives in `index.html` (`KEY` constant). Replace it with your own.
-Note: a client-side key is visible to anyone who opens devtools — fine for personal use,
-use a tiny proxy if you need to keep it private.
+The RapidAPI key never ships to the browser. The app calls a Cloudflare Worker proxy
+(`worker/`) which holds the key as a secret and edge-caches responses to conserve the
+free plan's 50 requests/day quota. To deploy your own:
+
+```sh
+cd worker
+wrangler deploy
+wrangler secret put RAPIDAPI_KEY   # paste your key at the prompt
+```
+
+Then point the `API` constant in `index.html` at your Worker URL, and add your Pages
+origin to `ALLOWED_ORIGINS` in `worker/index.js`.
 
 ## Files
 
